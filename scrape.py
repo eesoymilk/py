@@ -78,9 +78,9 @@ async def main():
         await asyncio.gather(*tasks)
 
         for series, courses in course_series.items():
-            with open(f'./Berkeley_EECS_2023_Schedules/{series}.md', 'w', encoding='utf-8') as file:
+            with open(f'./Berkeley_EECS_Courses/{series}.md', 'w', encoding='utf-8') as file:
                 for i, (number, title, unit, desc) in enumerate(courses, 1):
-                    file.write(f'{i}. {number} - {title} ({unit} unit)\n{desc}\n\n')
+                    file.write(f'{i}. **{number} - {title}** ({unit} unit)\n{desc}\n\n')
 
         # for d, courses in zip(departments, results):
         #     print(f"Department {d} Schedule:")
