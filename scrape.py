@@ -1,13 +1,24 @@
+import re
 import asyncio
+from typing import Literal
+
 from tqdm import tqdm
 from aiohttp import ClientSession
 from bs4 import BeautifulSoup as BS, ResultSet, Tag
 
 base_url = 'https://www2.eecs.berkeley.edu'
-schedule_url = f'{base_url}/Scheduling/{{}}/schedule.html'
+courses_url = f'{base_url}/Courses/{{}}'
 departments = ['EE', 'CS']
 
+pattern_100_series = r'\b\w+\s?(?:1[0-9][0-9])\b'
+pattern_200_series = r'\b\w+\s?(?:2[0-8][0-9]|29[0-79])\b'
+
+title_set: set[str] = set()
 ignored_courses = {}
+course_series: dict[Literal[100, 200], list[str, str, int, str]] = {
+    100: [],
+    200: [],
+}
 
 
 async def fetch_soup(session, url):
@@ -15,61 +26,67 @@ async def fetch_soup(session, url):
         return BS(await response.text(), 'html.parser')
 
 
-async def scrape_course_desc(session: ClientSession, url: str) -> str:
-    soup = await fetch_soup(session, url)
+async def scrape_courses(session: ClientSession, department: str):
+    soup = await fetch_soup(session, courses_url.format(department))
 
-    # Find the content div and then extract the text of the first p tag inside it
+    # with open(f'./Berkeley_EECS_2023_Schedules/{department}.md', 'w', encoding='utf-8') as file:
     content_div: Tag = soup.find('div', class_='content')
-    if content_div and isinstance(content_div.p, Tag):
-        return content_div.p.get_text(strip=True)
-    return ""
+    lis: ResultSet[Tag] = content_div.find_all('li')
 
+    for li in tqdm(lis):
+        if not isinstance(li.a, Tag):
+            continue
 
-async def scrape_schedule(session: ClientSession, department: str):
-    soup = await fetch_soup(session, schedule_url.format(department))
+        number, title = li.a.get_text(strip=True).split('. ')
 
-    with open(f'./Berkeley_EECS_2023_Schedules/{department}.md', 'w') as file:
-        rows: ResultSet[Tag] = soup.find_all('tr', class_='primary')
-        course_title_set: set[str] = set()
-        courses: list[tuple[str, str, str]] = []
+        if re.match(pattern_100_series, number):
+            series = 100
+        elif re.match(pattern_100_series, number):
+            series = 200
+        else:
+            continue
 
-        for row in tqdm(rows):
-            tds: ResultSet[Tag] = row.find_all('td')
-            if len(tds) < 4:  # ensure there are at least 5 td elements
-                continue
+        if title in title_set or title in ignored_courses:
+            continue
 
-            course_title = tds[3].get_text(strip=True)
-            if course_title in course_title_set:
-                continue
+        print(title)
 
-            th = row.find('th')
-            if th is None or not isinstance(th.a, Tag):
-                continue
+        if not isinstance(li.p, Tag):
+            continue
 
-            course_number = th.get_text(strip=True)
+        # Extracting the description
+        desc_start = li.p.find('strong', string='Catalog Description:').next_sibling
+        desc_end = li.p.find('br')
+        desc = ''.join(
+            str(item)
+            for item in li.p.contents[
+                li.p.contents.index(desc_start) : li.p.contents.index(desc_end)
+            ]
+        ).strip()
 
-            course_url = th.a['href']
-            # fetch from course url: I want the text in the first <p> within <div class="content">. The text will be assigned to course_decs
-            course_desc = await scrape_course_desc(session, f'{base_url}/{course_url}')
+        # Extracting the units
+        unit_start = li.p.find('strong', string='Units:').next_sibling
+        unit = unit_start.strip()
 
-            course_title_set.add(course_title)
-            courses.append((course_number, course_title, course_desc))
-
-            file.write(f"## {course_title}\n{course_desc}\n")
-
-    return courses
+        title_set.add(title)
+        course_series[series].append((number, title, unit, desc))
 
 
 async def main():
     async with ClientSession() as session:
-        tasks = [scrape_schedule(session, d) for d in departments]
-        results: list[tuple[str, str, str]] = await asyncio.gather(*tasks)
+        tasks = [scrape_courses(session, d) for d in departments]
+        await asyncio.gather(*tasks)
 
-        for d, courses in zip(departments, results):
-            print(f"Department {d} Schedule:")
-            for _, title, desc in courses:
-                print(f'{title}\n{desc}\n')
-            print('\n')
+        for series, courses in course_series.items():
+            with open(f'./Berkeley_EECS_2023_Schedules/{series}.md', 'w', encoding='utf-8') as file:
+                for i, (number, title, unit, desc) in enumerate(courses, 1):
+                    file.write(f'{i}. {number} - {title} ({unit} unit)\n{desc}\n\n')
+
+        # for d, courses in zip(departments, results):
+        #     print(f"Department {d} Schedule:")
+        #     for _, title, desc in courses:
+        #         print(f'{title}\n{desc}\n')
+        #     print('\n')
 
 
 if __name__ == '__main__':
