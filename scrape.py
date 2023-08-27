@@ -41,7 +41,7 @@ async def scrape_courses(session: ClientSession, department: str):
 
         if re.match(pattern_100_series, number):
             series = 100
-        elif re.match(pattern_100_series, number):
+        elif re.match(pattern_200_series, number):
             series = 200
         else:
             continue
